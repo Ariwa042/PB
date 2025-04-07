@@ -1,0 +1,126 @@
+:root {
+    --ios-blue: #007AFF;
+    --ios-background: #F2F2F7;
+    --ios-grey: #8E8E93;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--ios-background);
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.ios-form {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--ios-grey);
+    font-size: 14px;
+}
+
+input, select, textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #E5E5EA;
+    border-radius: 8px;
+    font-size: 16px;
+}
+
+.ios-button {
+    background: var(--ios-blue);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 14px 20px;
+    width: 100%;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.status-panel {
+    margin-top: 20px;
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+}
+
+#logs {
+    font-family: monospace;
+    background: #F8F8F8;
+    padding: 10px;
+    border-radius: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.status-pending {
+    @apply bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium;
+}
+
+.status-running {
+    @apply bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.status-completed {
+    @apply bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium;
+}
+
+.status-failed {
+    @apply bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-medium;
+}
+
+.log-entry {
+    @apply py-1 border-b border-gray-100 last:border-0;
+}
+
+.log-error {
+    @apply text-red-600;
+}
+
+.log-success {
+    @apply text-green-600;
+}
+
+.log-info {
+    @apply text-gray-600;
+}
+
+/* Custom scrollbar */
+#logs::-webkit-scrollbar {
+    width: 6px;
+}
+
+#logs::-webkit-scrollbar-track {
+    @apply bg-gray-100 rounded;
+}
+
+#logs::-webkit-scrollbar-thumb {
+    @apply bg-gray-400 rounded;
+}
+
+#logs::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500;
+}

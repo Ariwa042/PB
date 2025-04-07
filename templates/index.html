@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html class="h-full bg-gray-50">
+<head>
+    <title>Pi Network Flood Scheduler</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="h-full">
+    <div class="min-h-full">
+        <nav class="bg-white shadow-sm">
+            <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <div class="flex h-16 justify-between">
+                    <div class="flex">
+                        <div class="flex flex-shrink-0 items-center">
+                            <svg class="h-8 w-8 text-indigo-600" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm0-2a8 8 0 100-16 8 8 0 000 16z"/>
+                            </svg>
+                        </div>
+                        <div class="ml-6 flex items-center">
+                            <h1 class="text-2xl font-semibold text-gray-900">Pi Flood Scheduler</h1>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <div class="py-10">
+            <main>
+                <div class="mx-auto max-w-7xl sm:px-6 lg:px-8">
+                    <div class="px-4 py-8 sm:px-0">
+                        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                            <!-- Form Card -->
+                            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                                <div class="p-6">
+                                    <form id="floodForm" class="space-y-6">
+                                        <div class="space-y-4">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700">Mnemonic Phrase</label>
+                                                <textarea name="mnemonic" rows="3" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" required></textarea>
+                                            </div>
+
+                                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700">Destination Address</label>
+                                                    <input type="text" name="destination" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" required>
+                                                </div>
+
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700">Amount (Pi)</label>
+                                                    <input type="number" name="amount" step="0.000001" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" required>
+                                                </div>
+                                            </div>
+
+                                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700">Network</label>
+                                                    <select name="network" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                                                        <option value="Pi Testnet">Testnet</option>
+                                                        <option value="Pi Mainnet">Mainnet</option>
+                                                    </select>
+                                                </div>
+
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700">Concurrent Submissions</label>
+                                                    <input type="number" name="concurrency" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" required>
+                                                </div>
+                                            </div>
+
+                                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700">Scheduled Time (UTC)</label>
+                                                    <input type="datetime-local" 
+                                                           name="scheduled_time" 
+                                                           step="1"
+                                                           required
+                                                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                                                    <p class="mt-1 text-xs text-gray-500">Time is in 24-hour format (HH:MM:SS)</p>
+                                                </div>
+
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700">Duration (seconds)</label>
+                                                    <input type="number" name="duration" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" required>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="pt-4">
+                                            <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                                Schedule Flood
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <!-- Status Card -->
+                            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                                <div class="p-6">
+                                    <h2 class="text-lg font-medium text-gray-900">Status & Logs</h2>
+                                    <div id="status" class="mt-6">
+                                        <div id="logs" class="bg-gray-50 rounded-lg p-4 h-[400px] overflow-y-auto font-mono text-sm">
+                                            <div class="text-gray-500">Waiting for job submission...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
