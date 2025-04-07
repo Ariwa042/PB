@@ -1,13 +1,17 @@
+# 👇 This must be the very first import before anything else
+import eventlet
+eventlet.monkey_patch()
+
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 import threading
 from datetime import datetime
-import pytz  # Add pytz for timezone handling
+import pytz
 from pi_flood import run_scheduler
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key'
-socketio = SocketIO(app)
+socketio = SocketIO(app, async_mode='eventlet')  # Make sure async_mode is set
 
 class FloodJob:
     def __init__(self, params):
@@ -50,10 +54,9 @@ def submit():
     job_id = datetime.now().strftime('%Y%m%d%H%M%S')
     params['job_id'] = job_id
 
-    # Convert input time to UTC
     try:
         local_time = datetime.strptime(params['scheduled_time'], "%Y-%m-%d %H:%M:%S")
-        local_tz = pytz.timezone("Etc/UTC")  # Replace with your local timezone if needed
+        local_tz = pytz.timezone("Etc/UTC")  # Replace with "Africa/Lagos" or your actual timezone if needed
         utc_time = local_tz.localize(local_time).astimezone(pytz.utc)
         params['scheduled_time'] = utc_time.strftime("%Y-%m-%d %H:%M:%S")
     except Exception as e:
@@ -61,7 +64,7 @@ def submit():
 
     job = FloodJob(params)
     jobs[job_id] = job
-    
+
     def run_job():
         job.run()
         socketio.emit('job_update', {
@@ -72,7 +75,7 @@ def submit():
 
     thread = threading.Thread(target=run_job)
     thread.start()
-    
+
     return jsonify({'job_id': job_id})
 
 @app.route('/status/<job_id>')
@@ -86,4 +89,4 @@ def status(job_id):
     return jsonify({'error': 'Job not found'}), 404
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    socketio.run(app, host='0.0.0.0', port=10000)  # For local testing
