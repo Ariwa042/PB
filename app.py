@@ -1,163 +1,121 @@
 #!/usr/bin/env python3
-import sys
-import time
-import json
-import pytz
-import requests
+import json, time, pytz, asyncio
 from datetime import datetime
 from bip_utils import Bip39SeedGenerator, Bip32Slip10Ed25519
 from stellar_sdk import (
-    Keypair, Server, TransactionBuilder, StrKey, Asset, TransactionEnvelope
+    Keypair, Server, TransactionBuilder, StrKey,
+    Asset, Account
 )
-from stellar_sdk.exceptions import NotFoundError
-from queue import Queue, Empty
-import threading
+from stellar_sdk.transaction_builder import TransactionBuilder as TB
+from httpx import AsyncClient, Timeout, Limits
 
-CONFIG_FILE = "config.json"
+# ─── Load config ───────────────────────────────────────────────────────────────
+cfg         = json.load(open("config.json"))
+MNEMONIC    = cfg["mnemonic"]
+DESTINATION = cfg["destination"]
+AMOUNT      = str(float(cfg["amount"]))
+NETWORK     = cfg["network"].lower()
+START_TIME  = datetime.strptime(cfg["start_time"], "%Y-%m-%d %H:%M:%S")
+DURATION    = float(cfg["duration"])
+CONCURRENCY = int(cfg["concurrency"])
 
-def derive_strkey_seed(mnemonic: str) -> str:
-    seed_bytes = Bip39SeedGenerator(mnemonic).Generate()
-    slip = Bip32Slip10Ed25519.FromSeed(seed_bytes)
-    raw = slip.DerivePath("m/44'/314159'/0'").PrivateKey().Raw().ToBytes()
-    return StrKey.encode_ed25519_secret_seed(raw)
+IS_MAINNET  = NETWORK.startswith("pi main")
+HORIZON     = "https://api.mainnet.minepi.com" if IS_MAINNET else "https://api.testnet.minepi.com"
+PASSPHRASE  = "Pi Network" if IS_MAINNET else "Pi Testnet"
 
-def parse_utc(dt_str: str) -> float:
-    local = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-    local = pytz.timezone("Africa/Lagos").localize(local)
-    return local.astimezone(pytz.utc).timestamp()
+# ─── Helpers ───────────────────────────────────────────────────────────────────
+lagos = pytz.timezone("Africa/Lagos")
+def to_utc(dt): return lagos.localize(dt).astimezone(pytz.utc).timestamp()
 
-def build_signed_xdr(server, public_key, kp, passphrase, base_fee, destination, amount):
-    acct = server.load_account(public_key)
+def derive_master(mnemonic):
+    seed = Bip39SeedGenerator(mnemonic).Generate()
+    slip = Bip32Slip10Ed25519.FromSeed(seed)
+    raw  = slip.DerivePath("m/44'/314159'/0'").PrivateKey().Raw().ToBytes()
+    return Keypair.from_secret(StrKey.encode_ed25519_secret_seed(raw))
+
+# ─── Build & fee-bump one payment TX and return envelope XDR ──────────────────
+async def build_feebumped_xdr(server, kp, destination, amount, base_fee):
+    # fetch current sequence
+    acct = await asyncio.to_thread(server.load_account, kp.public_key)
+    # build inner payment
     tx = (
         TransactionBuilder(
             source_account=acct,
-            network_passphrase=passphrase,
-            base_fee=base_fee
+            network_passphrase=PASSPHRASE,
+            base_fee=base_fee,
         )
         .append_payment_op(destination, Asset.native(), amount)
         .set_timeout(30)
         .build()
     )
     tx.sign(kp)
-    return tx.to_xdr()
+    # fee-bump
+    fb = TB.build_fee_bump_transaction(
+        fee_source=kp.public_key,
+        base_fee=base_fee * 2,
+        inner_transaction_envelope=tx,
+        network_passphrase=PASSPHRASE
+    )
+    fb.sign(kp)
+    return fb.to_xdr()
 
-def main():
-    print("🔁 Pi Network P2P Flood Scheduler\n")
+# ─── Main ─────────────────────────────────────────────────────────────────────
+async def main():
+    server  = Server(HORIZON)
+    master  = derive_master(MNEMONIC)
+    base_fee= server.fetch_base_fee()
 
-    cfg = json.load(open(CONFIG_FILE))
-    mnemonic    = cfg["mnemonic"]
-    destination = cfg["destination"]
-    amount      = str(float(cfg["amount"]))
-    network     = cfg["network"]
-    start_time  = cfg["start_time"]
-    duration    = float(cfg["duration"])
-    concurrency = int(cfg["concurrency"])
+    print(f"[{NETWORK.upper()}] {master.public_key} · fee={base_fee}")
 
-    is_mainnet = network.lower().startswith("pi main")
-    # <<< Use Pi’s passphrases, not Stellar’s defaults >>>
-    passphrase = "Pi Network" if is_mainnet else "Pi Testnet"
-    horizon    = "https://api.mainnet.minepi.com" if is_mainnet else "https://api.testnet.minepi.com"
-    server     = Server(horizon)
+    # wait for at least one base reserve
+    reserve = 0.5 * 2
+    while True:
+        bal = float(
+            next(b for b in server.accounts()
+                     .account_id(master.public_key).call()["balances"]
+                 if b["asset_type"]=="native")["balance"]
+        )
+        if bal >= reserve * CONCURRENCY:
+            break
+        print(f"Waiting balance {bal:.2f}/{reserve*CONCURRENCY:.2f}…")
+        await asyncio.sleep(1)
 
-    # Derive and confirm keypair
-    secret = derive_strkey_seed(mnemonic)
-    kp     = Keypair.from_secret(secret)
-    pubkey = kp.public_key
-    print("✅ Derived Keypair:")
-    print("   Secret Seed:", secret)
-    print("   Public Key:", pubkey)
+    # two persistent HTTP/2 clients
+    timeout = Timeout(60, connect=5, read=60, write=30)
+    limits  = Limits(max_connections=CONCURRENCY*2)
+    reader  = AsyncClient(http2=True, timeout=timeout, limits=limits)
+    writer  = AsyncClient(http2=True, timeout=timeout, limits=limits)
 
-    # Verify account exists
-    try:
-        resp = server.accounts().account_id(pubkey).call()
-    except NotFoundError:
-        sys.exit(f"❌ Account {pubkey} not found or unfunded.")
+    # wait until start
+    wait = to_utc(START_TIME) - time.time()
+    if wait>0:
+        await asyncio.sleep(wait)
 
-    # Confirm signer
-    if not any(s["key"] == pubkey for s in resp["signers"]):
-        sys.exit("❌ Derived public key is not a signer on the account!")
+    print(f"🚀 Launching flood: {CONCURRENCY} concurrent streams for {DURATION}s…")
+    end = time.time()+DURATION
 
-    print("✅ Public key confirmed as account signer.")
-
-    base_fee = server.fetch_base_fee()
-
-    # Prebuild for testnet
-    q = Queue()
-    if not is_mainnet:
-        for _ in range(concurrency):
-            q.put(build_signed_xdr(server, pubkey, kp, passphrase, base_fee, destination, amount))
-        print(f"✅ Prebuilt {concurrency} transactions for testnet\n")
-
-    # Wait until just before start
-    start_ts = parse_utc(start_time)
-    delay    = start_ts - time.time() - 0.2
-    if delay > 0:
-        print(f"⏳ Waiting {delay:.2f}s until submission…\n")
-        time.sleep(delay)
-    else:
-        print("⚠️ Submission time is in the past; flooding immediately\n")
-
-    end_ts   = time.time() + duration
-    attempts = 0
-    success  = threading.Event()
-    seq_lock = threading.Lock()
-
-    def worker(idx):
-        nonlocal attempts
-        while not success.is_set() and time.time() < end_ts:
-            try:
-                if is_mainnet:
-                    with seq_lock:
-                        xdr = build_signed_xdr(server, pubkey, kp, passphrase, base_fee, destination, amount)
+    async def worker(idx:int):
+        nonlocal end
+        while time.time()<end:
+            # build fee-bumped XDR via reader’s connection
+            xdr = await build_feebumped_xdr(server, master, DESTINATION, AMOUNT, base_fee)
+            # submit via writer’s connection
+            res = await writer.post(f"{HORIZON}/transactions", data={"tx":xdr})
+            if res.status_code==200:
+                print(f"[{idx}] ✅ {res.json().get('hash')}")
+            else:
+                # retry once on failure
+                res2 = await writer.post(f"{HORIZON}/transactions", data={"tx":xdr})
+                if res2.status_code==200:
+                    print(f"[{idx}] ✅(retry) {res2.json().get('hash')}")
                 else:
-                    xdr = q.get(timeout=0.1)
-                env = TransactionEnvelope.from_xdr(xdr, passphrase)
-            except Empty:
-                continue
-            except Exception as e:
-                print(f"❌ Thread {idx} build error: {e}")
-                continue
+                    print(f"[{idx}] ❌ {res2.status_code}")
 
-            with seq_lock:
-                attempts += 1
-                n = attempts
+    await asyncio.gather(*[worker(i+1) for i in range(CONCURRENCY)])
+    await reader.aclose()
+    await writer.aclose()
 
-            try:
-                resp = server.submit_transaction(env)
-                print(f"✅ Thread {idx} attempt {n} succeeded: {resp['hash']}")
-                success.set()
-                return
-            except Exception as e:
-                # print Horizon error details
-                if hasattr(e, "response"):
-                    try:
-                        print(json.dumps(e.response.json(), indent=2))
-                    except:
-                        print(e)
-                else:
-                    print(e)
+    print("🎉 Flood complete")
 
-                # re-queue on testnet
-                if not is_mainnet:
-                    q.put(build_signed_xdr(server, pubkey, kp, passphrase, base_fee, destination, amount))
-
-    # Start threads
-    threads = []
-    for i in range(concurrency):
-        t = threading.Thread(target=worker, args=(i+1,))
-        t.start()
-        threads.append(t)
-
-    for t in threads:
-        rem = end_ts - time.time()
-        if rem > 0:
-            t.join(timeout=rem)
-
-    elapsed = time.time() - max(start_ts, time.time() - duration)
-    rate    = attempts / elapsed if elapsed > 0 else 0
-    print(f"\n🔄 Flood complete. Attempts: {attempts}, Time: {elapsed:.2f}s, Rate: {rate:.2f} tx/s")
-    if not success.is_set():
-        print("⚠️ All attempts failed.")
-
-if __name__ == "__main__":
-    main()
+if __name__=="__main__":
+    asyncio.run(main())

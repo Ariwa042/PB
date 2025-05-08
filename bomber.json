@@ -1,0 +1,12 @@
+{
+    "network": "mainnet",
+    "mnemonic": "shine faith quality little theme bicycle drum adjust hybrid vibrant nut sting return soccer silver search play uncover menu scrub river force celery disagree",
+    "destination": "GBEBQVUCVN4Z72JKDHD26EOMDPP3ETDSZ2TRIZLAUJ55AIM5P3C4BSNW",
+    "start_time": "2025-04-30 21:41:41",
+    "duration": 300,
+    "channel_count": 5,
+    "channel_fund_pi": "0.60",
+    "flood_amount_pi": "300",
+    "master_fee_multiplier": 2
+  }
+  
